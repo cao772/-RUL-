@@ -46,6 +46,22 @@
 
 ## 本地启动
 
+### 0. 导入客户包中的运行资产
+
+仓库是公开仓库，因此模型权重和训练窗口不直接提交。clone 后先执行：
+
+```bash
+python scripts/import_assets.py "/path/to/光伏组件RUL预测.zip"
+```
+
+该脚本只导入 DKASC scaler 与 PVDAQ 1403 的模型/窗口/标签，**不会导入海南原始数据或海南历史结果**。
+
+随后执行 Smoke test：
+
+```bash
+python scripts/smoke_test.py
+```
+
 ### macOS / Linux
 
 ```bash
@@ -122,9 +138,8 @@ http://127.0.0.1:8000/docs
 │   ├── inference.py            真实模型加载与推理
 │   ├── model/model_common.py   Mamba / GRN / LoRA 模型定义
 │   └── static/                 无外部前端依赖的可视化页面
-├── assets/checkpoints/
-│   ├── dkasc84_pretrain/       前 5 个特征 scaler
-│   └── peft_1403/              1403 权重、scaler、窗口与标签
+├── assets/checkpoints/          本地导入的运行资产（Git 忽略二进制）
+├── scripts/import_assets.py     从客户 ZIP 安全导入非海南资产
 ├── scripts/smoke_test.py
 ├── requirements.txt
 └── run.py

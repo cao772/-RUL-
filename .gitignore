@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.DS_Store
+.pytest_cache/
+# Customer runtime assets are imported locally from the provided ZIP.
+assets/checkpoints/**/*.npy
+assets/checkpoints/**/*.pth
+assets/checkpoints/**/*.pkl
+# Never commit Hainan confidential source/result material.
+data/hainan_*
+assets/checkpoints/hainan_results/
+checkpoints/hainan_results/
+# Optional local copy of the customer archive.
+光伏组件RUL预测.zip

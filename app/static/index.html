@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>光伏组件健康状态与RUL预测平台</title>
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><div class="brand-mark">PV</div><div><strong>光伏健康预测</strong><span>RUL · Degradation</span></div></div>
+      <nav>
+        <button class="nav-item active" data-tab="overview">健康总览</button>
+        <button class="nav-item" data-tab="predict">智能预测</button>
+        <button class="nav-item" data-tab="data">输入数据</button>
+        <button class="nav-item" data-tab="model">模型说明</button>
+      </nav>
+      <div class="side-status"><span class="dot" id="healthDot"></span><div><b id="healthText">正在连接模型</b><small id="deviceText">-</small></div></div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div><h1>光伏组件健康状态与RUL预测平台</h1><p>基于 PV_RUL_Mamba PEFT-1403 的本地演示系统</p></div>
+        <div class="model-badge"><span>模型</span><b id="modelName">加载中…</b></div>
+      </header>
+
+      <section class="tab active" id="tab-overview">
+        <div class="hero-row">
+          <div><p class="eyebrow">当前演示数据</p><h2>PVDAQ 1403 · 60天健康窗口</h2><p class="subtle">选择内置真实窗口并调用模型，结果由本地 PyTorch 推理实时生成。</p></div>
+          <button class="primary" id="goPredict">进入预测</button>
+        </div>
+        <div class="metric-grid">
+          <article class="metric"><span>样本窗口</span><strong id="sampleCount">-</strong><small>真实可复跑样本</small></article>
+          <article class="metric"><span>输入长度</span><strong>60 天</strong><small>连续日级时序</small></article>
+          <article class="metric"><span>输入特征</span><strong>6 维</strong><small>功率 / 气象 / Pmax</small></article>
+          <article class="metric"><span>输出任务</span><strong>3 项</strong><small>RUL / 退化率 / 轨迹</small></article>
+        </div>
+        <div class="panel-grid two">
+          <article class="panel">
+            <div class="panel-head"><div><h3>V1 可演示闭环</h3><p>从真实样本到模型输出</p></div></div>
+            <div class="flow">
+              <div><b>① 选择 / 上传</b><span>60×6 日级特征</span></div><i>→</i>
+              <div><b>② 标准化与裁剪</b><span>按训练域处理</span></div><i>→</i>
+              <div><b>③ Mamba 推理</b><span>本地 CPU / GPU</span></div><i>→</i>
+              <div><b>④ 可视化</b><span>RUL / 退化 / 轨迹</span></div>
+            </div>
+          </article>
+          <article class="panel caution">
+            <div class="panel-head"><div><h3>当前产品边界</h3><p>演示时明确说明</p></div></div>
+            <ul class="clean-list" id="limitList"><li>正在读取模型说明…</li></ul>
+          </article>
+        </div>
+        <article class="panel">
+          <div class="panel-head"><div><h3>模型验证指标</h3><p>来自客户包内 validation_report.json</p></div></div>
+          <div class="validation-grid">
+            <div><span>RUL R²</span><b id="metricR2">-</b></div>
+            <div><span>RUL MAE</span><b id="metricMae">-</b></div>
+            <div><span>退化率 MAE</span><b id="metricRateMae">-</b></div>
+            <div><span>退化率预测中位数</span><b id="metricRateMedian">-</b></div>
+          </div>
+        </article>
+      </section>
+
+      <section class="tab" id="tab-predict">
+        <div class="workspace-grid">
+          <aside class="control-panel panel">
+            <div class="panel-head"><div><h3>预测参数</h3><p>内置样例会直接调用真实模型</p></div></div>
+            <label>样本窗口</label>
+            <div class="range-row"><input id="sampleIndex" type="range" min="0" max="739" value="0" /><input id="sampleNumber" type="number" min="0" max="739" value="0" /></div>
+            <label>通道</label>
+            <select id="channel"><option value="0">通道 1</option><option value="1">通道 2</option></select>
+            <button class="primary wide" id="runPrediction">运行真实模型预测</button>
+            <div class="divider"><span>或</span></div>
+            <label for="csvFile">上传标准模型特征 CSV</label>
+            <input id="csvFile" type="file" accept=".csv,text/csv" />
+            <button class="secondary wide" id="runCsv">上传并预测</button>
+            <a class="download-link" href="/static/sample_feature_60d.csv" download>下载 60×6 CSV 示例</a>
+            <div class="progress" id="progress"><span></span><em>等待预测</em></div>
+          </aside>
+
+          <div class="result-area">
+            <div class="result-cards">
+              <article><span>年化退化率</span><strong id="rateValue">--</strong><small id="rateStatus">等待预测</small></article>
+              <article><span>RUL 参考值</span><strong id="rulValue">--</strong><small id="rulYears">剩余寿命辅助指标</small></article>
+              <article><span>当前 Pmax</span><strong id="currentPmax">--</strong><small>最近7天中位数</small></article>
+              <article><span>60天预测末值</span><strong id="endPmax">--</strong><small id="deltaPmax">未来变化 --</small></article>
+            </div>
+            <article class="panel">
+              <div class="panel-head"><div><h3>Pmax 健康趋势与未来轨迹</h3><p>实线：输入窗口 · 虚线：模型未来60天输出</p></div><span class="chip" id="clipBadge">未运行</span></div>
+              <div id="healthChart" class="chart-wrap empty">运行模型后显示趋势曲线</div>
+            </article>
+            <article class="panel">
+              <div class="panel-head"><div><h3>六维输入概览</h3><p>当前选择窗口的日级模型特征</p></div></div>
+              <div id="miniCharts" class="mini-grid"><div class="placeholder">正在读取样例…</div></div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="tab" id="tab-data">
+        <article class="panel">
+          <div class="panel-head"><div><h3>模型输入契约</h3><p>V1 接收模型已处理特征；现场 SCADA 原始数据适配在下一阶段补齐。</p></div></div>
+          <div class="table-wrap"><table><thead><tr><th>字段</th><th>业务含义</th><th>单位</th><th>要求</th></tr></thead><tbody id="featureTable"></tbody></table></div>
+        </article>
+        <article class="panel">
+          <div class="panel-head"><div><h3>当前样本数据</h3><p id="sampleCaption">样本 0 · 通道 1</p></div></div>
+          <div class="table-wrap tall"><table><thead><tr><th>Day</th><th>功率比</th><th>辐照度</th><th>环境温度</th><th>Pmax</th><th>组件温度</th><th>RH</th></tr></thead><tbody id="sampleTable"></tbody></table></div>
+        </article>
+      </section>
+
+      <section class="tab" id="tab-model">
+        <div class="panel-grid two">
+          <article class="panel">
+            <div class="panel-head"><div><h3>模型技术链</h3><p>来自客户提供的研究快照</p></div></div>
+            <ol class="steps">
+              <li><b>60天×6特征输入</b><span>功率比、辐照度、环境温度、Pmax、组件温度、湿度</span></li>
+              <li><b>Mamba / S6 时序建模</b><span>两层状态空间时序主干</span></li>
+              <li><b>LoRA 跨气候迁移</b><span>DKASC 沙漠预训练 → PVDAQ 1403 湿热微调</span></li>
+              <li><b>Physics-informed 训练</b><span>Arrhenius / Peck / 单调 / 平滑 / 对齐等约束</span></li>
+              <li><b>多任务输出</b><span>RUL、未来60天 Pmax 轨迹、年化退化率</span></li>
+            </ol>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><div><h3>为什么 V1 不直接接现场原始数据</h3><p>避免把尚未确定的输入口径写死</p></div></div>
+            <p class="explain">当前客户包能稳定复现的是 <b>60×6 模型特征 → 模型预测</b>。现场原始功率究竟来自组件、组串还是逆变器，以及额定功率、停机/限电状态、STC 修正口径仍需客户确认。因此 V1 先把真实推理和可视化打通，下一阶段只新增“原始数据适配层”，不推翻模型与前端。</p>
+          </article>
+        </div>
+      </section>
+    </main>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
