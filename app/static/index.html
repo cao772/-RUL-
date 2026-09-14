@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>光伏组件健康状态与RUL预测平台</title>
   <link rel="stylesheet" href="/static/app.css" />
+  <style>.field-note,.chart-note{margin:8px 0 0;color:#65758b;font-size:11px;line-height:1.7}.chart-note{padding-top:10px;border-top:1px solid #dfe7f1}</style>
 </head>
 <body>
   <div class="app-shell">
@@ -27,23 +28,23 @@
 
       <section class="tab active" id="tab-overview">
         <div class="hero-row">
-          <div><p class="eyebrow">当前演示数据</p><h2>PVDAQ 1403 · 60天健康窗口</h2><p class="subtle">选择内置真实窗口并调用模型，结果由本地 PyTorch 推理实时生成。</p></div>
+          <div><p class="eyebrow">当前演示数据</p><h2>PVDAQ 1403 · 60天健康窗口</h2><p class="subtle">选择内置真实窗口并调用模型，RUL 与年化退化率由本地 PyTorch 推理实时生成。</p></div>
           <button class="primary" id="goPredict">进入预测</button>
         </div>
         <div class="metric-grid">
           <article class="metric"><span>样本窗口</span><strong id="sampleCount">-</strong><small>真实可复跑样本</small></article>
           <article class="metric"><span>输入长度</span><strong>60 天</strong><small>连续日级时序</small></article>
           <article class="metric"><span>输入特征</span><strong>6 维</strong><small>功率 / 气象 / Pmax</small></article>
-          <article class="metric"><span>输出任务</span><strong>3 项</strong><small>RUL / 退化率 / 轨迹</small></article>
+          <article class="metric"><span>核心输出</span><strong>2 项</strong><small>RUL / 年化退化率</small></article>
         </div>
         <div class="panel-grid two">
           <article class="panel">
-            <div class="panel-head"><div><h3>V1 可演示闭环</h3><p>从真实样本到模型输出</p></div></div>
+            <div class="panel-head"><div><h3>V1 可演示闭环</h3><p>从真实样本到模型评估结果</p></div></div>
             <div class="flow">
               <div><b>① 选择 / 上传</b><span>60×6 日级特征</span></div><i>→</i>
               <div><b>② 标准化与裁剪</b><span>按训练域处理</span></div><i>→</i>
               <div><b>③ Mamba 推理</b><span>本地 CPU / GPU</span></div><i>→</i>
-              <div><b>④ 可视化</b><span>RUL / 退化 / 轨迹</span></div>
+              <div><b>④ 可视化</b><span>RUL / 退化率 / 趋势外推</span></div>
             </div>
           </article>
           <article class="panel caution">
@@ -68,8 +69,7 @@
             <div class="panel-head"><div><h3>预测参数</h3><p>内置样例会直接调用真实模型</p></div></div>
             <label>样本窗口</label>
             <div class="range-row"><input id="sampleIndex" type="range" min="0" max="739" value="0" /><input id="sampleNumber" type="number" min="0" max="739" value="0" /></div>
-            <label>通道</label>
-            <select id="channel"><option value="0">通道 1</option><option value="1">通道 2</option></select>
+            <p class="field-note">客户快照中的两路通道为重复副本，当前固定使用第 1 路，不再提供无效通道切换。</p>
             <button class="primary wide" id="runPrediction">运行真实模型预测</button>
             <div class="divider"><span>或</span></div>
             <label for="csvFile">上传标准模型特征 CSV</label>
@@ -84,14 +84,15 @@
               <article><span>年化退化率</span><strong id="rateValue">--</strong><small id="rateStatus">等待预测</small></article>
               <article><span>RUL 参考值</span><strong id="rulValue">--</strong><small id="rulYears">剩余寿命辅助指标</small></article>
               <article><span>当前 Pmax</span><strong id="currentPmax">--</strong><small>最近7天中位数</small></article>
-              <article><span>60天预测末值</span><strong id="endPmax">--</strong><small id="deltaPmax">未来变化 --</small></article>
+              <article><span>健康状态</span><strong id="healthStatusValue">--</strong><small>基于年化退化率分级</small></article>
             </div>
             <article class="panel">
-              <div class="panel-head"><div><h3>Pmax 健康趋势与未来轨迹</h3><p>实线：输入窗口 · 虚线：模型未来60天输出</p></div><span class="chip" id="clipBadge">未运行</span></div>
-              <div id="healthChart" class="chart-wrap empty">运行模型后显示趋势曲线</div>
+              <div class="panel-head"><div><h3>Pmax 历史健康趋势与退化率外推</h3><p>实线：本次输入60天 · 虚线：基于年化退化率的60天趋势外推（非模型直接预测）</p></div><span class="chip" id="clipBadge">未运行</span></div>
+              <div id="healthChart" class="chart-wrap empty">运行模型后显示历史趋势与退化率外推</div>
+              <p class="chart-note" id="trendNote">未来虚线仅用于解释“按当前模型退化率继续发展”的趋势，不代表 Mamba 对未来60天逐日值的直接预测。</p>
             </article>
             <article class="panel">
-              <div class="panel-head"><div><h3>六维输入概览</h3><p>当前选择窗口的日级模型特征</p></div></div>
+              <div class="panel-head"><div><h3>六维输入概览</h3><p>当前本次送入模型的日级特征</p></div></div>
               <div id="miniCharts" class="mini-grid"><div class="placeholder">正在读取样例…</div></div>
             </article>
           </div>
@@ -104,7 +105,7 @@
           <div class="table-wrap"><table><thead><tr><th>字段</th><th>业务含义</th><th>单位</th><th>要求</th></tr></thead><tbody id="featureTable"></tbody></table></div>
         </article>
         <article class="panel">
-          <div class="panel-head"><div><h3>当前样本数据</h3><p id="sampleCaption">样本 0 · 通道 1</p></div></div>
+          <div class="panel-head"><div><h3>当前输入数据</h3><p id="sampleCaption">样本 0</p></div></div>
           <div class="table-wrap tall"><table><thead><tr><th>Day</th><th>功率比</th><th>辐照度</th><th>环境温度</th><th>Pmax</th><th>组件温度</th><th>RH</th></tr></thead><tbody id="sampleTable"></tbody></table></div>
         </article>
       </section>
@@ -118,12 +119,16 @@
               <li><b>Mamba / S6 时序建模</b><span>两层状态空间时序主干</span></li>
               <li><b>LoRA 跨气候迁移</b><span>DKASC 沙漠预训练 → PVDAQ 1403 湿热微调</span></li>
               <li><b>Physics-informed 训练</b><span>Arrhenius / Peck / 单调 / 平滑 / 对齐等约束</span></li>
-              <li><b>多任务输出</b><span>RUL、未来60天 Pmax 轨迹、年化退化率</span></li>
+              <li><b>业务核心输出</b><span>RUL、年化退化率；内部 trajectory_head 保留训练物理约束用途，不作为未来60天直接业务预测。</span></li>
             </ol>
           </article>
           <article class="panel">
+            <div class="panel-head"><div><h3>为什么页面仍显示未来60天虚线</h3><p>它是趋势解释，不是第三个模型预测任务</p></div></div>
+            <p class="explain">未来60天虚线由 <b>当前 Pmax × 年化退化率</b> 做线性趋势外推，用于直观说明“若当前退化速度延续，健康度可能如何变化”。它不读取模型内部 trajectory_head 作为未来逐日预测，因此不会再把训练约束头误包装成业务预测。</p>
+          </article>
+          <article class="panel">
             <div class="panel-head"><div><h3>为什么 V1 不直接接现场原始数据</h3><p>避免把尚未确定的输入口径写死</p></div></div>
-            <p class="explain">当前客户包能稳定复现的是 <b>60×6 模型特征 → 模型预测</b>。现场原始功率究竟来自组件、组串还是逆变器，以及额定功率、停机/限电状态、STC 修正口径仍需客户确认。因此 V1 先把真实推理和可视化打通，下一阶段只新增“原始数据适配层”，不推翻模型与前端。</p>
+            <p class="explain">当前客户包能稳定复现的是 <b>60×6 模型特征 → 模型评估</b>。现场原始功率究竟来自组件、组串还是逆变器，以及额定功率、停机/限电状态、STC 修正口径仍需客户确认。因此 V1 先把真实推理和可视化打通，下一阶段只新增“原始数据适配层”，不推翻模型与前端。</p>
           </article>
         </div>
       </section>

@@ -10,5 +10,12 @@ if __name__ == "__main__":
     e = PredictionEngine(ROOT)
     for idx in (0, 100, e.n_samples - 1):
         r = e.predict_sample(idx)
-        print(idx, r["rul_days"], r["rate_pct_per_year"], r["forecast_end_pmax_ratio"])
+        assert len(r["trend_projection_60d"]) == 61
+        print(
+            idx,
+            r["rul_days"],
+            r["rate_pct_per_year"],
+            r["trend_end_pmax_ratio"],
+            r["status"],
+        )
     print("SMOKE_OK")

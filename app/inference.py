@@ -88,12 +88,11 @@ class PredictionEngine:
     def n_samples(self) -> int:
         return int(self.X.shape[0])
 
-    def sample_raw(self, sample_index: int, channel: int = 0) -> np.ndarray:
+    def sample_raw(self, sample_index: int) -> np.ndarray:
         if not 0 <= sample_index < self.n_samples:
             raise ValueError(f"sample_index 必须在 0~{self.n_samples - 1} 之间")
-        if channel not in (0, 1):
-            raise ValueError("channel 仅支持 0 或 1")
-        return np.asarray(self.X[sample_index, :, channel, :], dtype=np.float32)
+        # 客户快照中的两个通道是同一序列的重复副本，业务演示固定使用第 1 路。
+        return np.asarray(self.X[sample_index, :, 0, :], dtype=np.float32)
 
     def _validate_features(self, features: np.ndarray) -> np.ndarray:
         arr = np.asarray(features, dtype=np.float32)
@@ -107,21 +106,37 @@ class PredictionEngine:
             raise ValueError("相对湿度必须在 0~100 之间")
         return arr
 
+    @staticmethod
+    def _rows(raw: np.ndarray) -> list[dict[str, float | int]]:
+        rows: list[dict[str, float | int]] = []
+        for day_idx, vals in enumerate(raw, start=1):
+            row: dict[str, float | int] = {"day": day_idx}
+            for name, value in zip(FEATURE_NAMES, vals.tolist()):
+                row[name] = round(float(value), 5)
+            rows.append(row)
+        return rows
+
     def predict_features(self, features: np.ndarray) -> dict[str, Any]:
         raw = self._validate_features(features)
-        z = (raw - self.feat_mean) / self.feat_std
-        z = np.clip(z, self.clip_lo, self.clip_hi).astype(np.float32)
+        z_unclipped = (raw - self.feat_mean) / self.feat_std
+        clipped_mask = (z_unclipped < self.clip_lo) | (z_unclipped > self.clip_hi)
+        z = np.clip(z_unclipped, self.clip_lo, self.clip_hi).astype(np.float32)
         x = torch.from_numpy(z).unsqueeze(0).to(self.device)
+
         with torch.inference_mode():
-            p, traj, r = self.model(x)
+            p, _trajectory_internal, r = self.model(x)
+
         rul_raw = float(p.squeeze().cpu().item() * self.y_std + self.y_mean)
         rul_days = float(np.clip(rul_raw, RUL_MIN_DAYS, RUL_MAX_DAYS))
         rate_pct = float((r.squeeze().cpu().item() * self.r_std + self.r_mean) * 100.0)
-        traj_raw = traj.squeeze(0).cpu().numpy().astype(np.float32) * self.feat_std[3] + self.feat_mean[3]
 
         current_health = float(np.nanmedian(raw[-7:, 3]))
-        predicted_end = float(traj_raw[-1])
-        delta_60 = predicted_end - current_health
+        day_axis = np.arange(0, WINDOW_SIZE + 1, dtype=np.float32)
+        rate_fraction = rate_pct / 100.0
+        trend_projection = current_health * (1.0 + rate_fraction * day_axis / 365.0)
+        trend_end = float(trend_projection[-1])
+        trend_delta = trend_end - current_health
+
         if rate_pct <= -3.0:
             status = "退化偏快"
         elif rate_pct <= -0.5:
@@ -137,52 +152,48 @@ class PredictionEngine:
             "rul_raw_days": round(rul_raw, 1),
             "rate_pct_per_year": round(rate_pct, 3),
             "current_pmax_ratio": round(current_health, 4),
-            "forecast_end_pmax_ratio": round(predicted_end, 4),
-            "forecast_delta_60d": round(float(delta_60), 4),
             "status": status,
-            "trajectory": [round(float(v), 5) for v in traj_raw.tolist()],
-            "input_clipped": bool(np.any((z <= self.clip_lo + 1e-6) | (z >= self.clip_hi - 1e-6))),
+            "trend_projection_60d": [round(float(v), 5) for v in trend_projection.tolist()],
+            "trend_end_pmax_ratio": round(trend_end, 4),
+            "trend_delta_60d": round(float(trend_delta), 4),
+            "trend_projection_note": "基于模型年化退化率和最近7天Pmax中位数的线性趋势外推，不是Mamba trajectory_head的直接未来预测。",
+            "input_pmax_history": [round(float(v), 5) for v in raw[:, 3].tolist()],
+            "input_rows": self._rows(raw),
+            "input_clipped": bool(np.any(clipped_mask)),
             "device": str(self.device),
         }
 
-    def predict_sample(self, sample_index: int, channel: int = 0) -> dict[str, Any]:
-        raw = self.sample_raw(sample_index, channel)
+    def predict_sample(self, sample_index: int) -> dict[str, Any]:
+        raw = self.sample_raw(sample_index)
         result = self.predict_features(raw)
-        target_rul = float(self.y_rul[sample_index, channel])
-        target_rate = float(self.y_rate[sample_index, channel] * 100.0)
+        target_rul = float(self.y_rul[sample_index, 0])
+        target_rate = float(self.y_rate[sample_index, 0] * 100.0)
         result.update({
             "sample_index": sample_index,
-            "channel": channel,
             "target_rul_days": round(target_rul, 1),
             "target_rate_pct_per_year": round(target_rate, 3),
         })
         return result
 
-    def sample_payload(self, sample_index: int, channel: int = 0) -> dict[str, Any]:
-        raw = self.sample_raw(sample_index, channel)
-        rows = []
-        for day_idx, vals in enumerate(raw, start=1):
-            row = {"day": day_idx}
-            for name, value in zip(FEATURE_NAMES, vals.tolist()):
-                row[name] = round(float(value), 5)
-            rows.append(row)
+    def sample_payload(self, sample_index: int) -> dict[str, Any]:
+        raw = self.sample_raw(sample_index)
         return {
             "sample_index": sample_index,
-            "channel": channel,
             "window_days": WINDOW_SIZE,
             "features": FEATURE_NAMES,
-            "rows": rows,
+            "rows": self._rows(raw),
         }
 
     def meta(self) -> dict[str, Any]:
         metrics = self.validation.get("metrics", self.validation)
         return {
             "model_name": "PV_RUL_Mamba PEFT-1403",
-            "model_type": "Mamba + LoRA + physics-informed multi-task heads",
+            "model_type": "Mamba + LoRA + physics-informed multi-task training",
             "dataset_name": "PVDAQ 1403",
             "sample_count": self.n_samples,
             "window_days": WINDOW_SIZE,
-            "channel_count": int(self.X.shape[2]),
+            "logical_channel_count": 1,
+            "source_channel_note": "客户快照双通道为重复副本，演示固定使用第1路。",
             "feature_names": FEATURE_NAMES,
             "feature_labels": FEATURE_LABELS,
             "feature_units": FEATURE_UNITS,
@@ -190,6 +201,8 @@ class PredictionEngine:
             "validation_metrics": metrics,
             "limitations": [
                 "RUL 当前作为辅助参考值，不应作为精确更换日期承诺。",
+                "业务核心模型输出为 RUL 与年化退化率；trajectory_head 主要承担训练期物理/平滑/一致性约束，不作为未来60天直接预测展示。",
+                "页面未来60天虚线仅为基于年化退化率的趋势外推，并非Mamba直接预测。",
                 "V1 上传接口接收已经形成的 60×6 日级模型特征，不负责现场原始 SCADA 到模型特征的全量预处理。",
                 "海南原始数据和海南历史结果未进入公开仓库。",
             ],

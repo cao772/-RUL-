@@ -6,7 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -16,7 +16,7 @@ from app.inference import FEATURE_NAMES, PredictionEngine
 ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / "app" / "static"
 
-app = FastAPI(title="光伏组件健康状态与RUL预测平台", version="0.1.0")
+app = FastAPI(title="光伏组件健康状态与RUL预测平台", version="0.2.0")
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
@@ -27,7 +27,6 @@ def engine() -> PredictionEngine:
 
 class SampleRequest(BaseModel):
     sample_index: int = Field(ge=0)
-    channel: int = Field(default=0, ge=0, le=1)
 
 
 class FeatureRequest(BaseModel):
@@ -51,9 +50,9 @@ def meta() -> dict:
 
 
 @app.get("/api/sample/{sample_index}")
-def sample(sample_index: int, channel: int = Query(default=0, ge=0, le=1)) -> dict:
+def sample(sample_index: int) -> dict:
     try:
-        return engine().sample_payload(sample_index, channel)
+        return engine().sample_payload(sample_index)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -61,7 +60,7 @@ def sample(sample_index: int, channel: int = Query(default=0, ge=0, le=1)) -> di
 @app.post("/api/predict/sample")
 def predict_sample(req: SampleRequest) -> dict:
     try:
-        return engine().predict_sample(req.sample_index, req.channel)
+        return engine().predict_sample(req.sample_index)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

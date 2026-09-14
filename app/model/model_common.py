@@ -90,7 +90,12 @@ class MambaBlock(nn.Module):
 
 
 class PV_RUL_Mamba(nn.Module):
-    """Three-head model: RUL, future 60-day Pmax trajectory, annual degradation rate."""
+    """Three-head training architecture: RUL, internal physics trajectory, annual degradation rate.
+
+    The trajectory head is retained for checkpoint compatibility and training-time
+    physics/smoothness/alignment constraints. It is not exposed as a direct 60-day
+    business forecast in the demo.
+    """
 
     def __init__(self, input_dim: int = INPUT_DIM, hidden_dim: int = HIDDEN_DIM,
                  num_layers: int = NUM_LAYERS, dropout: float = DROPOUT):
